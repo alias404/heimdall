@@ -21,6 +21,54 @@ cleanup() {
     exit 0
 }
 
+# Prints a preflight failure with an optional hint and exits before any Docker work starts.
+precheck_fail() {
+    echo "" >&2
+    echo "❌ PRECHECK FAILED: $1" >&2
+    [ -n "$2" ] && echo "   👉 $2" >&2
+    echo "" >&2
+    exit 1
+}
+
+# Fails the precheck if the given CLI is not on PATH.
+require_cli() {
+    if ! command -v "$1" >/dev/null 2>&1; then
+        precheck_fail "'$1' CLI not found on PATH." "$2"
+    fi
+}
+
+# Verifies every CLI the run depends on before any containers are started.
+precheck_clis() {
+    require_cli go "Install Go: https://go.dev/doc/install"
+    require_cli make "Install Xcode Command Line Tools: xcode-select --install"
+    # Used by the 'pg-goose' make target to run migrations.
+    require_cli goose "Install with: go install github.com/pressly/goose/v3/cmd/goose@latest (and make sure \$(go env GOPATH)/bin is on PATH)"
+}
+
+# Verifies Docker is usable so failures are explained instead of surfacing as raw compose errors.
+precheck_docker() {
+    require_cli docker "Install Docker Desktop: https://docs.docker.com/get-docker/"
+
+    if ! docker compose version >/dev/null 2>&1; then
+        precheck_fail "Docker Compose v2 is not available ('docker compose')." "Update Docker Desktop or install the compose plugin."
+    fi
+
+    # Use the same stripped environment as bin/docker-compose-test.sh so we probe
+    # the exact daemon compose will talk to.
+    if ! env -i PATH="$PATH" docker info >/dev/null 2>&1; then
+        precheck_fail "Docker daemon is not running or not reachable." "Start Docker Desktop (or your Docker engine) and re-run."
+    fi
+}
+
+echo ""
+echo "═══════════════════════════════════════"
+echo "🔍 PRECHECKS"
+echo "═══════════════════════════════════════"
+precheck_clis
+echo "✅ Required CLIs found!"
+precheck_docker
+echo "✅ Docker is ready!"
+
 # Set up signal traps to catch Ctrl+C (SIGINT) and SIGTERM
 trap cleanup SIGINT SIGTERM
 
